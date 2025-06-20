@@ -20,9 +20,10 @@ const items = [
 ];
 
 export function AppSidebar() {
-  const { collapsed } = useSidebar();
+  const { state } = useSidebar();
   const location = useLocation();
   const currentPath = location.pathname;
+  const collapsed = state === "collapsed";
 
   const isActive = (path: string) => currentPath === path;
   const getNavCls = ({ isActive }: { isActive: boolean }) =>
@@ -31,7 +32,7 @@ export function AppSidebar() {
       : "hover:bg-slate-100";
 
   return (
-    <Sidebar className={`${collapsed ? "w-14" : "w-64"} border-r bg-white`} collapsible>
+    <Sidebar className={`${collapsed ? "w-14" : "w-64"} border-r bg-white`} collapsible="icon">
       <SidebarContent className="p-4">
         <SidebarGroup>
           <SidebarGroupLabel className="text-slate-600 mb-4">
