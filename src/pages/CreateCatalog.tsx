@@ -1,13 +1,13 @@
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, Eye, Save } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "../supabaseClient";
 
 interface Product {
   id: string;
@@ -22,7 +22,9 @@ const CreateCatalog = () => {
   const [catalogName, setCatalogName] = useState("");
   const [catalogDescription, setCatalogDescription] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [slug, setSlug] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Product>({
     id: "",
     name: "",
@@ -31,60 +33,144 @@ const CreateCatalog = () => {
     image: ""
   });
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+  
+    setUploading(true);
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+  
+    const { data, error: uploadError } = await supabase.storage
+      .from("product-images")
+      .upload(filePath, file);
+  
+    if (uploadError) {
+      toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
+      setUploading(false);
+      return;
+    }
+  
+    const { data: publicUrlData } = supabase
+      .storage
+      .from("product-images")
+      .getPublicUrl(filePath);
+  
+    const publicUrl = publicUrlData?.publicUrl;
+    console.log("✅ Public URL Generated:", publicUrl);
+  
+    if (!publicUrl) {
+      toast({ title: "Could not generate image URL", variant: "destructive" });
+      setUploading(false);
+      return;
+    }
+  
+    setCurrentProduct((prev) => ({ ...prev, image: publicUrl }));
+    toast({ title: "Image Uploaded" });
+    setUploading(false);
+  };
+  
   const addProduct = () => {
     if (!currentProduct.name || !currentProduct.price) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in product name and price",
-        variant: "destructive"
-      });
+      toast({ title: "Missing Info", description: "Product name and price required", variant: "destructive" });
       return;
     }
 
-    const newProduct = {
-      ...currentProduct,
-      id: Date.now().toString()
-    };
+    if (!currentProduct.image) {
+      toast({ title: "Image Missing", description: "Upload an image before adding the product", variant: "destructive" });
+      return;
+    }
+
+    const newProduct = { ...currentProduct, id: Date.now().toString() };
     setProducts([...products, newProduct]);
     setCurrentProduct({ id: "", name: "", description: "", price: "", image: "" });
-    toast({
-      title: "Product Added",
-      description: "Product has been added to your catalog"
-    });
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    toast({ title: "Product Added" });
   };
 
   const removeProduct = (id: string) => {
     setProducts(products.filter(product => product.id !== id));
   };
 
-  const saveCatalog = () => {
-    if (!catalogName || !whatsappNumber || products.length === 0) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in catalog name, WhatsApp number, and add at least one product",
-        variant: "destructive"
-      });
+  const saveCatalog = async () => {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      toast({ title: "Unauthorized", description: "Please log in again.", variant: "destructive" });
       return;
     }
 
-    const catalog = {
-      id: Date.now().toString(),
-      name: catalogName,
-      description: catalogDescription,
-      whatsappNumber,
-      products,
-      createdAt: new Date().toISOString()
-    };
+    if (!slug.trim()) {
+      toast({ title: "Missing Slug", description: "Please enter a URL-friendly name.", variant: "destructive" });
+      return;
+    }
 
-    const existingCatalogs = JSON.parse(localStorage.getItem('catalogs') || '[]');
-    localStorage.setItem('catalogs', JSON.stringify([...existingCatalogs, catalog]));
+    const { data: existingSlug, error: slugError } = await supabase
+      .from("catalogs")
+      .select("id")
+      .eq("slug", slug);
 
-    toast({
-      title: "Catalog Created",
-      description: "Your catalog has been saved successfully"
-    });
+    if (slugError) {
+      toast({ title: "Error checking slug", description: slugError.message, variant: "destructive" });
+      return;
+    }
 
-    navigate('/dashboard');
+    if (existingSlug && existingSlug.length > 0) {
+      toast({ title: "Slug Already Taken", description: "Please choose a different URL name.", variant: "destructive" });
+      return;
+    }
+
+    if (products.length === 0) {
+      toast({ title: "No Products", description: "Add at least one product before saving.", variant: "destructive" });
+      return;
+    }
+
+    if (products.some(p => !p.image)) {
+      toast({ title: "Missing Product Image", description: "All products must have images.", variant: "destructive" });
+      return;
+    }
+
+    const { data: catalogData, error: catalogError } = await supabase
+      .from("catalogs")
+      .insert([{
+        user_id: user.id,
+        name: catalogName,
+        description: catalogDescription,
+        whatsapp: whatsappNumber,
+        slug,
+        is_live: true
+      }])
+      .select()
+      .single();
+
+    if (catalogError) {
+      toast({ title: "Catalog Error", description: catalogError.message, variant: "destructive" });
+      return;
+    }
+
+    const productInserts = products.map(product => ({
+      catalog_id: catalogData.id,
+      name: product.name,
+      description: product.description,
+      price: parseFloat(product.price),
+      image_url: product.image
+    }));
+
+    const { error: productError } = await supabase
+      .from("products")
+      .insert(productInserts);
+
+    if (productError) {
+      toast({ title: "Product Save Failed", description: productError.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "Catalog Created", description: "Your catalog was saved successfully." });
+    navigate("/dashboard");
   };
 
   return (
@@ -95,171 +181,72 @@ const CreateCatalog = () => {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-8">
-        {/* Left Column - Form */}
         <div className="space-y-6">
-          {/* Catalog Info */}
           <Card>
-            <CardHeader>
-              <CardTitle>Catalog Information</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Catalog Information</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="catalogName">Catalog Name</Label>
-                <Input
-                  id="catalogName"
-                  value={catalogName}
-                  onChange={(e) => setCatalogName(e.target.value)}
-                  placeholder="My Awesome Store"
-                />
-              </div>
-              <div>
-                <Label htmlFor="catalogDescription">Description</Label>
-                <Textarea
-                  id="catalogDescription"
-                  value={catalogDescription}
-                  onChange={(e) => setCatalogDescription(e.target.value)}
-                  placeholder="Describe your store..."
-                  rows={3}
-                />
-              </div>
-              <div>
-                <Label htmlFor="whatsappNumber">WhatsApp Number</Label>
-                <Input
-                  id="whatsappNumber"
-                  value={whatsappNumber}
-                  onChange={(e) => setWhatsappNumber(e.target.value)}
-                  placeholder="+1234567890"
-                />
-              </div>
+              <Label>Catalog Name</Label>
+              <Input value={catalogName} onChange={(e) => setCatalogName(e.target.value)} />
+              <Label>Description</Label>
+              <Textarea value={catalogDescription} onChange={(e) => setCatalogDescription(e.target.value)} />
+              <Label>WhatsApp Number</Label>
+              <Input value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} />
+              <Label>Slug</Label>
+              <Input value={slug} onChange={(e) => setSlug(e.target.value.replace(/\s+/g, "_"))} />
             </CardContent>
           </Card>
 
-          {/* Add Product */}
           <Card>
-            <CardHeader>
-              <CardTitle>Add Product</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Add Product</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="productName">Product Name</Label>
-                <Input
-                  id="productName"
-                  value={currentProduct.name}
-                  onChange={(e) => setCurrentProduct({...currentProduct, name: e.target.value})}
-                  placeholder="Product name"
-                />
-              </div>
-              <div>
-                <Label htmlFor="productDescription">Description</Label>
-                <Textarea
-                  id="productDescription"
-                  value={currentProduct.description}
-                  onChange={(e) => setCurrentProduct({...currentProduct, description: e.target.value})}
-                  placeholder="Product description..."
-                  rows={3}
-                />
-              </div>
-              <div>
-                <Label htmlFor="productPrice">Price</Label>
-                <Input
-                  id="productPrice"
-                  value={currentProduct.price}
-                  onChange={(e) => setCurrentProduct({...currentProduct, price: e.target.value})}
-                  placeholder="$99.99"
-                />
-              </div>
-              <div>
-                <Label htmlFor="productImage">Image URL</Label>
-                <Input
-                  id="productImage"
-                  value={currentProduct.image}
-                  onChange={(e) => setCurrentProduct({...currentProduct, image: e.target.value})}
-                  placeholder="https://example.com/image.jpg or use placeholder"
-                />
-              </div>
-              <Button onClick={addProduct} className="w-full gap-2">
-                <Plus size={20} />
-                Add Product
+              <Input placeholder="Product Name" value={currentProduct.name} onChange={(e) => setCurrentProduct({ ...currentProduct, name: e.target.value })} />
+              <Textarea placeholder="Description" value={currentProduct.description} onChange={(e) => setCurrentProduct({ ...currentProduct, description: e.target.value })} />
+              <Input placeholder="Price" value={currentProduct.price} onChange={(e) => setCurrentProduct({ ...currentProduct, price: e.target.value })} />
+              <Input type="file" accept="image/*" onChange={handleFileUpload} ref={fileInputRef} />
+              {currentProduct.image && (
+                <img src={currentProduct.image} alt="Preview" className="w-full h-32 object-cover rounded-md border" />
+              )}
+              <Button onClick={addProduct} disabled={uploading} className="w-full gap-2">
+                {uploading ? "Uploading..." : <><Plus size={20} /> Add Product</>}
               </Button>
             </CardContent>
           </Card>
         </div>
 
-        {/* Right Column - Preview */}
         <div className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Eye size={20} />
-                Preview
-              </CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2"><Eye size={20} /> Preview</CardTitle></CardHeader>
             <CardContent>
-              <div className="bg-slate-50 rounded-lg p-6 min-h-[400px]">
-                <h2 className="text-2xl font-bold text-center mb-2">
-                  {catalogName || "Your Catalog Name"}
-                </h2>
-                <p className="text-slate-600 text-center mb-6">
-                  {catalogDescription || "Your catalog description"}
-                </p>
-                
-                <div className="space-y-4">
-                  {products.map((product) => (
-                    <div key={product.id} className="bg-white rounded-lg p-4 border relative">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2 text-red-600 hover:text-red-700"
-                        onClick={() => removeProduct(product.id)}
-                      >
-                        <X size={16} />
-                      </Button>
-                      <div className="flex gap-4">
-                        <div className="w-20 h-20 bg-slate-200 rounded-lg flex items-center justify-center overflow-hidden">
-                          {product.image ? (
-                            <img 
-                              src={product.image} 
-                              alt={product.name}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.src = "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=200&h=200&fit=crop";
-                              }}
-                            />
-                          ) : (
-                            <img 
-                              src="https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=200&h=200&fit=crop"
-                              alt="placeholder"
-                              className="w-full h-full object-cover"
-                            />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold">{product.name}</h3>
-                          <p className="text-sm text-slate-600 mb-2">{product.description}</p>
-                          <p className="text-lg font-bold text-green-600">{product.price}</p>
-                        </div>
+              <h2 className="text-2xl font-bold text-center mb-2">{catalogName || "Your Catalog Name"}</h2>
+              <p className="text-slate-600 text-center mb-6">{catalogDescription || "Your catalog description"}</p>
+              <div className="space-y-4">
+                {products.map((product) => (
+                  <div key={product.id} className="bg-white rounded-lg p-4 border relative">
+                    <Button variant="ghost" size="sm" className="absolute top-2 right-2 text-red-600" onClick={() => removeProduct(product.id)}>
+                      <X size={16} />
+                    </Button>
+                    <div className="flex gap-4">
+                      <div className="w-20 h-20 bg-slate-200 rounded-lg overflow-hidden">
+                        <img src={product.image || "https://via.placeholder.com/200"} alt={product.name} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold">{product.name}</h3>
+                        <p className="text-sm text-slate-600">{product.description}</p>
+                        <p className="text-lg font-bold text-green-600">{product.price}</p>
                       </div>
                     </div>
-                  ))}
-                  
-                  {products.length === 0 && (
-                    <div className="text-center text-slate-500 py-8">
-                      No products added yet
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
 
           <div className="flex gap-4">
-            <Button onClick={saveCatalog} className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 gap-2">
-              <Save size={20} />
-              Save Catalog
+            <Button onClick={saveCatalog} className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 gap-2">
+              <Save size={20} /> Save Catalog
             </Button>
             <Button variant="outline" className="gap-2">
-              <Eye size={20} />
-              Preview
+              <Eye size={20} /> Preview
             </Button>
           </div>
         </div>

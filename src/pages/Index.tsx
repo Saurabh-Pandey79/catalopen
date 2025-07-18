@@ -22,7 +22,7 @@ const Index = () => {
           </p>
           <div className="flex gap-4 justify-center flex-wrap">
             <Button asChild size="lg" className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
-              <Link to="/dashboard" className="gap-2">
+            <Link to="/register" className="gap-2">
                 Get Started <ArrowRight size={20} />
               </Link>
             </Button>
@@ -85,7 +85,7 @@ const Index = () => {
             Start creating your first catalog today - it's free!
           </p>
           <Button asChild size="lg" className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
-            <Link to="/dashboard" className="gap-2">
+            <Link to="/register" className="gap-2">
               Start Building <ArrowRight size={20} />
             </Link>
           </Button>
