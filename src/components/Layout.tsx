@@ -111,7 +111,7 @@ const Layout = () => {
           open={upiModal}
           onClose={() => setUpiModal(false)}
           upiId={upiId}
-          amount={149}
+          amount={199}
         />
       </div>
     </SidebarProvider>
