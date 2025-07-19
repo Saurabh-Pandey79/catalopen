@@ -78,10 +78,18 @@ const Layout = () => {
               </DropdownMenu>
             )}
 
-            <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
-              <HelpCircle size={16} />
-              <span>Help</span>
-            </Button>
+            <a
+            href="mailto:saurabh@catalopen.com?subject=Support%20Request&body=Hi%20Saurabh%2C%0A%0AI%20need%20help%20with..."
+            target="_blank"
+            rel="noopener noreferrer"
+            >
+           <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
+           <HelpCircle size={16} />
+           <span>Help</span>
+           </Button>
+           </a>
+
+
             <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
               <FileText size={16} />
               <span>Docs</span>
