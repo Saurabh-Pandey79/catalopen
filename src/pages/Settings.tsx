@@ -276,26 +276,6 @@ const Settings = () => {
           </CardContent>
         </Card>
 
-        {/* Billing */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard size={20} /> Billing & Subscription
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <h3 className="font-semibold text-green-800 mb-2">Free Plan</h3>
-              <p className="text-green-700 text-sm">
-                You're currently on the free plan.
-              </p>
-            </div>
-            <Button variant="outline" className="w-full">
-              Upgrade to Pro
-            </Button>
-          </CardContent>
-        </Card>
-
         {/* Logout */}
         <Card>
           <CardHeader>

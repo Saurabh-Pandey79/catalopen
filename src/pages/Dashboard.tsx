@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Eye, Share2, Edit3, Trash2, Copy, AlertCircle } from "lucide-react";
+import { Plus, Eye, Share2, Edit3, Trash2, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { toast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import UPIRechargeModal from "@/components/UPIRechargeModal";
 
 interface Catalog {
   id: string;
@@ -22,6 +29,9 @@ const Dashboard = () => {
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [loading, setLoading] = useState(true);
   const [walletWarning, setWalletWarning] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [catalogToDelete, setCatalogToDelete] = useState<Catalog | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -34,45 +44,33 @@ const Dashboard = () => {
       }
 
       // Fetch wallet
-      const { data: wallet, error: walletError } = await supabase
+      const { data: wallet } = await supabase
         .from("wallets")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
 
-        if (!wallet || wallet.balance <= 0) {
-          toast({
-            title: "Wallet not recharged",
-            description: "Please recharge your wallet to continue.",
-            variant: "destructive",
-          });
-        }
+      if (!wallet || wallet.balance <= 0) {
+        setWalletBalance(0);
+      } else {
+        setWalletBalance(wallet.balance);
+      }
 
-      const rechargeDate = new Date(wallet.updated_at || wallet.created_at);
+      const rechargeDate = new Date(wallet?.updated_at || wallet?.created_at);
       const today = new Date();
       const daysSinceRecharge = Math.floor((today.getTime() - rechargeDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Show warning if within 5 days of expiry
       if (daysSinceRecharge >= 25 && daysSinceRecharge < 30) {
         setWalletWarning(true);
       }
 
-      // If expired, disable all catalogs and reset wallet
-      if (daysSinceRecharge >= 30 && wallet.balance > 0) {
-        await supabase
-          .from("wallets")
-          .update({ balance: 0 })
-          .eq("user_id", user.id);
-
-        await supabase
-          .from("catalogs")
-          .update({ is_live: false })
-          .eq("user_id", user.id);
-
+      if (daysSinceRecharge >= 30 && wallet && wallet.balance > 0) {
+        await supabase.from("wallets").update({ balance: 0 }).eq("user_id", user.id);
+        await supabase.from("catalogs").update({ is_live: false }).eq("user_id", user.id);
+        setWalletBalance(0);
         toast({ title: "Account Expired", description: "Your wallet expired after 30 days. Renew to reactivate.", variant: "destructive" });
       }
 
-      // Fetch catalogs
       const { data: catalogsData, error } = await supabase
         .from("catalogs")
         .select("id, name, description, whatsapp, created_at, slug, is_live, products(id)")
@@ -90,19 +88,22 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  const deleteCatalog = async (id: string) => {
-    const { error } = await supabase.from("catalogs").delete().eq("id", id);
+  const handleDeleteConfirm = async () => {
+    if (!catalogToDelete) return;
+
+    const { error } = await supabase.from("catalogs").delete().eq("id", catalogToDelete.id);
     if (error) {
       toast({ title: "Failed to delete catalog", description: error.message, variant: "destructive" });
-      return;
+    } else {
+      setCatalogs((prev) => prev.filter((c) => c.id !== catalogToDelete.id));
+      toast({ title: "Catalog deleted" });
     }
-
-    setCatalogs((prev) => prev.filter((c) => c.id !== id));
-    toast({ title: "Catalog deleted" });
+    setCatalogToDelete(null);
   };
 
   return (
     <div className="max-w-7xl mx-auto">
+      {/* Wallet Recharge Warning */}
       {walletWarning && (
         <Dialog open={walletWarning} onOpenChange={setWalletWarning}>
           <DialogContent>
@@ -117,6 +118,35 @@ const Dashboard = () => {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Recharge Modal */}
+      <UPIRechargeModal
+        open={showRechargeModal}
+        onClose={() => setShowRechargeModal(false)}
+        upiId="saurabhv.pandey5@oksbi"
+        amount={199}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!catalogToDelete} onOpenChange={() => setCatalogToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Confirm Delete</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-700">
+            Are you sure you want to delete the catalog{" "}
+            <span className="font-semibold">{catalogToDelete?.name}</span>? This action cannot be undone.
+          </p>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setCatalogToDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -178,11 +208,17 @@ const Dashboard = () => {
                         Preview
                       </Link>
                     </Button>
+
                     <Button
                       variant="outline"
                       size="sm"
                       className="gap-1"
                       onClick={async () => {
+                        if (walletBalance === 0) {
+                          setShowRechargeModal(true);
+                          return;
+                        }
+
                         if (navigator.share && window.isSecureContext) {
                           try {
                             await navigator.share({
@@ -207,6 +243,7 @@ const Dashboard = () => {
                       <Share2 size={16} />
                       Share
                     </Button>
+
                     <Button variant="outline" size="sm" className="gap-1" asChild>
                       <Link to={`/edit/${catalog.id}`}>
                         <Edit3 size={16} />
@@ -217,7 +254,7 @@ const Dashboard = () => {
                       variant="outline"
                       size="sm"
                       className="gap-1 text-red-600 hover:text-red-700"
-                      onClick={() => deleteCatalog(catalog.id)}
+                      onClick={() => setCatalogToDelete(catalog)}
                     >
                       <Trash2 size={16} />
                       Delete

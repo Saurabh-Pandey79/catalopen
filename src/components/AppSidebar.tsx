@@ -30,33 +30,20 @@ export function AppSidebar({ mode = "default" }: { mode?: "default" | "overlay" 
 
   useEffect(() => {
     const fetchBusinessName = async () => {
-      const { data: authData, error: userError } = await supabase.auth.getUser();
-      const user = authData?.user;
-
-      if (userError || !user?.id) {
-        console.error("User not authenticated:", userError?.message);
-        setBusinessName("Not Logged In");
-        return;
-      }
-
-      const { data, error } = await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
         .from("profiles")
         .select("business")
         .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error fetching profile:", error.message);
-        setBusinessName("Business");
-        return;
-      }
+        .single();
 
       setBusinessName(data?.business || "Your Business");
     };
-
     fetchBusinessName();
   }, []);
 
+  const isActive = (path: string) => currentPath === path;
   const getNavCls = ({ isActive }: { isActive: boolean }) =>
     isActive
       ? "bg-gradient-to-r from-purple-100 to-blue-100 text-purple-700 border-r-2 border-purple-500"
